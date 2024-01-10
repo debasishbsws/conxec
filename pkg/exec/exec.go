@@ -23,15 +23,18 @@ func New(opt []Option) (*ExecOptions, error) {
 }
 
 type ExecOptions struct {
-	Target  string   // target is the container id or name
-	Command []string // cmd is the command to execute
-	DbgImg  string   // dbgImg is the debugger image
-	Runtime string   // runtime is the docker runtime
-	Schema  string   // schema is the schema of the target
-	UserN   string   // user-name is the user name of the target
-	UserID  string   // user-id is the user id of the target
-	GroupN  string   // group-name is the group name of the target
-	GroupID string   // group-id is the group id of the target
+	Target      string   // target is the container id or name
+	Command     []string // cmd is the command to execute
+	DbgImg      string   // dbgImg is the debugger image
+	Runtime     string   // runtime is the docker runtime
+	Schema      string   // schema is the schema of the target
+	UserN       string   // user-name is the user name of the target
+	UserID      string   // user-id is the user id of the target
+	GroupN      string   // group-name is the group name of the target
+	GroupID     string   // group-id is the group id of the target
+	Tty         bool     // tty is the flag to enable tty
+	Interactive bool     // interactive is the flag to enable interactive
+
 }
 
 type Option func(*ExecOptions) error
@@ -88,6 +91,7 @@ func WithUser(user string) Option {
 type DebuggerClient interface {
 	IsContainerRunning(context.Context, string) (bool, error)
 	GetContainerUserId(context.Context, string) (string, error)
+	PullTargetImage(context.Context, string, string) error
 }
 
 func RunDebugger(ctx context.Context, client DebuggerClient, opts *ExecOptions) error {
@@ -101,11 +105,16 @@ func RunDebugger(ctx context.Context, client DebuggerClient, opts *ExecOptions) 
 		return err
 	} else if targetContainerUserId != opts.UserID {
 		// TODO: support non-root user
-		/* Look for the user and group in the target container
+		/* Look for the user and group in the target container by look at /proc/1/status (somewhere around there)
 		uid, gid, err := getUidGid(target)
 		if not found send error of specifying user and group
 		*/
 		return fmt.Errorf("User of target container: %q is not root user -u to specify user and group", opts.Target)
+	}
+
+	fmt.Printf("Pulling debugger image: %q\n", opts.DbgImg)
+	if err := client.PullTargetImage(ctx, opts.DbgImg, opts.Runtime); err != nil {
+		return fmt.Errorf("failed to pull debugger image: %w", err)
 	}
 
 	return nil

@@ -26,6 +26,9 @@ func ExecCmd() *cobra.Command {
 	var command []string
 	var dbgImage string
 	var userGroup string
+	var runtime string
+	var tty bool
+	var interactive bool
 
 	cmd := &cobra.Command{
 		Use:   "exec [container-id/name] [command]",
@@ -59,12 +62,17 @@ func ExecCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&userGroup, "user", "-u", "root:0::root:0",
 		"user and group to use format: <user-name>:<user-id>::<group-name>:<group-id> (e.g: root:0::root:0)",
 	)
+	cmd.Flags().BoolVarP(&interactive, "interactive", "i", false, `Keep the STDIN open (as in "docker exec -i")`)
+	cmd.Flags().BoolVarP(&tty, "tty", "t", false, `Allocate a pseudo-TTY (as in "docker exec -t")`)
+	cmd.Flags().StringVar(&runtime, "runtime", "",
+		`Runtime address ("/var/run/docker.sock" | "/run/containerd/containerd.sock" | "https://<kube-api-addr>:8433/...)`,
+	)
 
 	return cmd
 }
 
 func ExecuteCmd(ctx context.Context, execOpts *exec.ExecOptions) error {
-	if sep := strings.Index(execOpts.Target, "://"); sep != 1 {
+	if sep := strings.Index(execOpts.Target, "://"); sep != -1 {
 		execOpts.Schema = execOpts.Target[:sep+3]
 		execOpts.Target = execOpts.Target[sep+3:]
 	} else {
@@ -73,7 +81,10 @@ func ExecuteCmd(ctx context.Context, execOpts *exec.ExecOptions) error {
 
 	switch execOpts.Schema {
 	case schemaDocker:
-		dockerClient := &docker.DockerClient{}
+		dockerClient, err := docker.NewClient(ctx, execOpts)
+		if err != nil {
+			return err
+		}
 		return exec.RunDebugger(ctx, dockerClient, execOpts)
 
 	case schemaContainerd:
@@ -83,3 +94,14 @@ func ExecuteCmd(ctx context.Context, execOpts *exec.ExecOptions) error {
 		return fmt.Errorf("unknown schema %q", execOpts.Schema)
 	}
 }
+
+// Still need to build a image of my own to use it as a debugger
+// docker run --rm -ti --name debuger --pid container:pig --network container:pig busybox sh -c '
+// ln -fs /proc/$$/root/bin/ /proc/1/root/.conxec
+// cat > /.conxec-entrypoint.sh <<EOF
+// #!/bin/sh
+// export PATH=$PATH:/.conxec
+
+// chroot /proc/1/root /.conxec/sh
+// EOF
+// sh /.conxec-entrypoint.sh'
