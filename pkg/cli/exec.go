@@ -57,9 +57,9 @@ func ExecCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&dbgImage, "dbg-img", "",
-		"debugger image to use (e.g: cgr.dev/chainguard/busybox:latest or busybox:musl)",
+		"debugger image to use (e.g: ghcr.io/debasishbsws/conxec-debugger:latest or busybox:musl)",
 	)
-	cmd.Flags().StringVarP(&userGroup, "user", "-u", "root:0::root:0",
+	cmd.Flags().StringVarP(&userGroup, "user", "u", "root:0::root:0",
 		"user and group to use format: <user-name>:<user-id>::<group-name>:<group-id> (e.g: root:0::root:0)",
 	)
 	cmd.Flags().BoolVarP(&interactive, "interactive", "i", false, `Keep the STDIN open (as in "docker exec -i")`)

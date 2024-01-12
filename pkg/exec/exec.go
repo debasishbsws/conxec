@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	defaultDebuggerImage = "cgr.dev/chainguard/busybox:latest"
+	defaultDebuggerImage = "ghcr.io/debasishbsws/conxec-debugger:latest"
 )
 
 func New(opt []Option) (*ExecOptions, error) {
@@ -92,6 +92,7 @@ type DebuggerClient interface {
 	IsContainerRunning(context.Context, string) (bool, error)
 	GetContainerUserId(context.Context, string) (string, error)
 	PullTargetImage(context.Context, string, string) error
+	CreateDebuggerContainer(context.Context, *ExecOptions, string) error
 }
 
 func RunDebugger(ctx context.Context, client DebuggerClient, opts *ExecOptions) error {
@@ -103,7 +104,7 @@ func RunDebugger(ctx context.Context, client DebuggerClient, opts *ExecOptions) 
 
 	if targetContainerUserId, err := client.GetContainerUserId(ctx, opts.Target); err != nil {
 		return err
-	} else if targetContainerUserId != opts.UserID {
+	} else if targetContainerUserId != "root" && targetContainerUserId != "0" {
 		// TODO: support non-root user
 		/* Look for the user and group in the target container by look at /proc/1/status (somewhere around there)
 		uid, gid, err := getUidGid(target)
