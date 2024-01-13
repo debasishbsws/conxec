@@ -4,7 +4,11 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
+	"text/template"
+
+	"github.com/google/uuid"
 )
 
 const (
@@ -26,6 +30,7 @@ type ExecOptions struct {
 	Target      string   // target is the container id or name
 	Command     []string // cmd is the command to execute
 	DbgImg      string   // dbgImg is the debugger image
+	Name        string   // name is the name of the container
 	Runtime     string   // runtime is the docker runtime
 	Schema      string   // schema is the schema of the target
 	UserN       string   // user-name is the user name of the target
@@ -49,6 +54,13 @@ func WithTarget(target string) Option {
 func WithCommand(command []string) Option {
 	return func(opt *ExecOptions) error {
 		opt.Command = command
+		return nil
+	}
+}
+
+func WithName(name string) Option {
+	return func(opt *ExecOptions) error {
+		opt.Name = name
 		return nil
 	}
 }
@@ -89,22 +101,70 @@ func WithUser(user string) Option {
 }
 
 type DebuggerClient interface {
-	IsContainerRunning(context.Context, string) (bool, error)
-	GetContainerUserId(context.Context, string) (string, error)
-	PullTargetImage(context.Context, string, string) error
-	CreateDebuggerContainer(context.Context, *ExecOptions, string) error
+	// GetContainerInfo returns the container info
+	GetContainerInfo(ctx context.Context, containerName string) (*ContainerInspectInfo, error)
+	// Pull an iamge from the registry if not present
+	PullImage(ctx context.Context, iamgeName string, patform string) error
+	// Create a Container and return the container id
+	CreateContainer(ctx context.Context, targetInspect *ContainerInspectInfo,
+		image, entrypoint, user, containerName string,
+		tty, stdin bool) (containerID string, err error)
+}
+
+func shellescape(args []string) []string {
+	escaped := []string{}
+	for _, a := range args {
+		// check if the string has any special characters or escape charecters
+		if strings.ContainsAny(a, " \t\n\\\r") {
+			escaped = append(escaped, strconv.Quote(a))
+		} else {
+			escaped = append(escaped, a)
+		}
+	}
+	return escaped
+}
+
+func generateEntrypoint(runID string, targetPID int, cmd []string) string {
+	entrypointTemplae := template.Must(template.ParseFiles(("conxec-entrypoint.templ")))
+	if len(cmd) == 0 {
+		cmd = []string{"sh"}
+	} else {
+		cmd = append([]string{"sh", "-c '"}, cmd...)
+		cmd = append(cmd, "'")
+	}
+	fmt.Printf("cmd: %s\n", cmd)
+	data := map[string]string{
+		"ID":  runID,
+		"PID": fmt.Sprintf("%d", targetPID),
+		"CMD": strings.Join(shellescape(cmd), " "),
+	}
+	var entrypoint strings.Builder
+	if err := entrypointTemplae.Execute(&entrypoint, data); err != nil {
+		panic(err)
+	}
+	return entrypoint.String()
+}
+
+type ContainerInspectInfo struct {
+	ID            string
+	Isrunning     bool
+	IsPrivileged  bool
+	IsPidModeHost bool
+	Pid           int
+	User          string
+	Platform      string
 }
 
 func RunDebugger(ctx context.Context, client DebuggerClient, opts *ExecOptions) error {
-	if isRunning, err := client.IsContainerRunning(ctx, opts.Target); err != nil {
+	targetContainerInfo, err := client.GetContainerInfo(ctx, opts.Target)
+	if err != nil {
 		return err
-	} else if !isRunning {
+	}
+	if !targetContainerInfo.Isrunning {
 		return fmt.Errorf("target container: %q is not running", opts.Target)
 	}
 
-	if targetContainerUserId, err := client.GetContainerUserId(ctx, opts.Target); err != nil {
-		return err
-	} else if targetContainerUserId != "root" && targetContainerUserId != "0" {
+	if targetContainerInfo.User != "root" && targetContainerInfo.User != "0" {
 		// TODO: support non-root user
 		/* Look for the user and group in the target container by look at /proc/1/status (somewhere around there)
 		uid, gid, err := getUidGid(target)
@@ -114,9 +174,34 @@ func RunDebugger(ctx context.Context, client DebuggerClient, opts *ExecOptions) 
 	}
 
 	fmt.Printf("Pulling debugger image: %q\n", opts.DbgImg)
-	if err := client.PullTargetImage(ctx, opts.DbgImg, opts.Runtime); err != nil {
+
+	if err := client.PullImage(ctx, opts.DbgImg, opts.Runtime); err != nil {
 		return fmt.Errorf("failed to pull debugger image: %w", err)
 	}
 
+	fmt.Printf("Creating debugger container...\n")
+	debID := getShortRandomID()
+	if opts.Name == "" {
+		opts.Name = fmt.Sprintf("conxec-debugger-%s", debID)
+	}
+	if opts.UserN != "" {
+		// pass do nothing for now, always run as root.
+	}
+	targetPID := 1
+	if !targetContainerInfo.IsPidModeHost {
+		targetPID = targetContainerInfo.Pid
+	}
+	entrypointStr := generateEntrypoint(debID, targetPID, opts.Command)
+	debugerID, err := client.CreateContainer(ctx, targetContainerInfo, opts.DbgImg, entrypointStr, "root:root", opts.Name, opts.Tty, opts.Interactive)
+	if err != nil {
+		return fmt.Errorf("failed to create debugger container: %w", err)
+	}
+	fmt.Println("Debugger container created:", debugerID)
+
 	return nil
+}
+
+// Util functions
+func getShortRandomID() string {
+	return strings.Split(uuid.NewString(), "-")[0]
 }

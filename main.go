@@ -3,11 +3,11 @@ package main
 import (
 	"log"
 
-	"github.com/debasishbsws/conxec/pkg/cli"
+	"github.com/debasishbsws/conxec/pkg/cmd"
 )
 
 func main() {
-	if err := cli.New().Execute(); err != nil {
+	if err := cmd.New().Execute(); err != nil {
 		log.Fatal(err)
 	}
 }

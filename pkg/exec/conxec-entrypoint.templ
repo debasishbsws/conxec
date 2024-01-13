@@ -1,0 +1,14 @@
+{{ if .nonroot }}
+# non-root
+su nonroot
+{{ end }}
+
+ln -fs /proc/$$/root/bin/ /proc/{{ .PID }}/root/tmp/.conxec-{{ .ID }}
+
+cat > /tmp/.conxec-entrypoint.sh <<EOF
+#!/bin/sh
+export PATH=$PATH:/tmp/.conxec
+
+chroot /proc/{{ .PID }}/root {{ .CMD }}
+EOF
+exec sh /tmp/.conxec-entrypoint.sh
