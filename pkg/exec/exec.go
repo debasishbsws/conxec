@@ -115,7 +115,7 @@ func shellescape(args []string) []string {
 	escaped := []string{}
 	for _, a := range args {
 		// check if the string has any special characters or escape charecters
-		if strings.ContainsAny(a, " \t\n\\\r") {
+		if strings.ContainsAny(a, " \t\n\r") {
 			escaped = append(escaped, strconv.Quote(a))
 		} else {
 			escaped = append(escaped, a)
@@ -126,17 +126,17 @@ func shellescape(args []string) []string {
 
 func generateEntrypoint(runID string, targetPID int, cmd []string) string {
 	entrypointTemplae := template.Must(template.ParseFiles(("conxec-entrypoint.templ")))
+	var command string
 	if len(cmd) == 0 {
-		cmd = []string{"sh"}
+		command = "sh"
 	} else {
-		cmd = append([]string{"sh", "-c '"}, cmd...)
-		cmd = append(cmd, "'")
+		command = "sh -c '" + strings.Join(shellescape(cmd), " ") + "'"
 	}
 	fmt.Printf("cmd: %s\n", cmd)
 	data := map[string]string{
 		"ID":  runID,
 		"PID": fmt.Sprintf("%d", targetPID),
-		"CMD": strings.Join(shellescape(cmd), " "),
+		"CMD": command,
 	}
 	var entrypoint strings.Builder
 	if err := entrypointTemplae.Execute(&entrypoint, data); err != nil {
