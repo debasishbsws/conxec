@@ -2,12 +2,15 @@ package exec
 
 import (
 	"context"
+	_ "embed"
 	"fmt"
+	"log"
 	"regexp"
 	"strconv"
 	"strings"
 	"text/template"
 
+	"github.com/debasishbsws/conxec/pkg/iocli"
 	"github.com/google/uuid"
 )
 
@@ -109,6 +112,7 @@ type DebuggerClient interface {
 	CreateContainer(ctx context.Context, targetInspect *ContainerInspectInfo,
 		image, entrypoint, user, containerName string,
 		tty, stdin bool) (containerID string, err error)
+	AttachContainer(ctx context.Context, containerID string, tty, stdin bool, cliStream *iocli.CliStream) error
 }
 
 func shellescape(args []string) []string {
@@ -124,15 +128,18 @@ func shellescape(args []string) []string {
 	return escaped
 }
 
+//go:embed conxec-entrypoint.templ
+var entrypointTemplate string
+
 func generateEntrypoint(runID string, targetPID int, cmd []string) string {
-	entrypointTemplae := template.Must(template.ParseFiles(("conxec-entrypoint.templ")))
+	entrypointTemplae := template.Must(template.New("entrypoint").Parse(entrypointTemplate))
 	var command string
 	if len(cmd) == 0 {
 		command = "sh"
 	} else {
 		command = "sh -c '" + strings.Join(shellescape(cmd), " ") + "'"
 	}
-	fmt.Printf("cmd: %s\n", cmd)
+	log.Printf("cmd: %s\n", cmd)
 	data := map[string]string{
 		"ID":  runID,
 		"PID": fmt.Sprintf("%d", targetPID),
@@ -155,7 +162,7 @@ type ContainerInspectInfo struct {
 	Platform      string
 }
 
-func RunDebugger(ctx context.Context, client DebuggerClient, opts *ExecOptions) error {
+func RunDebugger(ctx context.Context, client DebuggerClient, opts *ExecOptions, cliStream *iocli.CliStream) error {
 	targetContainerInfo, err := client.GetContainerInfo(ctx, opts.Target)
 	if err != nil {
 		return err
@@ -173,13 +180,13 @@ func RunDebugger(ctx context.Context, client DebuggerClient, opts *ExecOptions) 
 		return fmt.Errorf("User of target container: %q is not root user -u to specify user and group", opts.Target)
 	}
 
-	fmt.Printf("Pulling debugger image: %q\n", opts.DbgImg)
+	cliStream.PrintAux("Pulling debugger image: %q\n", opts.DbgImg)
 
 	if err := client.PullImage(ctx, opts.DbgImg, opts.Runtime); err != nil {
 		return fmt.Errorf("failed to pull debugger image: %w", err)
 	}
 
-	fmt.Printf("Creating debugger container...\n")
+	cliStream.PrintAux("Creating debugger container...\n")
 	debID := getShortRandomID()
 	if opts.Name == "" {
 		opts.Name = fmt.Sprintf("conxec-debugger-%s", debID)
@@ -197,6 +204,7 @@ func RunDebugger(ctx context.Context, client DebuggerClient, opts *ExecOptions) 
 		return fmt.Errorf("failed to create debugger container: %w", err)
 	}
 	fmt.Println("Debugger container created:", debugerID)
+	client.AttachContainer(ctx, debugerID, opts.Tty, opts.Interactive, cliStream)
 
 	return nil
 }

@@ -3,14 +3,18 @@ package docker
 import (
 	"context"
 	"fmt"
+	"io"
+	"log"
 
 	"github.com/debasishbsws/conxec/pkg/exec"
+	"github.com/debasishbsws/conxec/pkg/iocli"
 	"github.com/docker/cli/cli/streams"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
-	"github.com/docker/docker/pkg/jsonmessage"
+	"github.com/moby/moby/pkg/jsonmessage"
+	"github.com/moby/moby/pkg/stdcopy"
 )
 
 type DockerClient struct {
@@ -19,7 +23,7 @@ type DockerClient struct {
 	targetInspect *types.ContainerJSON
 }
 
-func NewClient(ctx context.Context, opts *exec.ExecOptions) (*DockerClient, error) {
+func NewClient(ctx context.Context, opts *exec.ExecOptions, clistream *iocli.CliStream) (*DockerClient, error) {
 	dockerOpts := []client.Opt{
 		client.FromEnv,
 		client.WithAPIVersionNegotiation(),
@@ -31,8 +35,10 @@ func NewClient(ctx context.Context, opts *exec.ExecOptions) (*DockerClient, erro
 	if err != nil {
 		return nil, fmt.Errorf("failed to create docker client: %w", err)
 	}
+
 	return &DockerClient{
 		client: dockerClient,
+		out:    clistream.AuxStream(),
 	}, nil
 }
 
@@ -62,7 +68,6 @@ func (c *DockerClient) PullImage(ctx context.Context, image string, platform str
 	if err != nil {
 		return fmt.Errorf("failed to pull image: %w", err)
 	}
-
 	return jsonmessage.DisplayJSONMessagesToStream(resp, c.out, nil)
 }
 
@@ -102,4 +107,123 @@ func (c *DockerClient) CreateContainer(ctx context.Context, targetInspect *exec.
 	fmt.Printf("Created container: %q\n", resp.ID)
 
 	return resp.ID, nil
+}
+
+func (c *DockerClient) AttachContainer(ctx context.Context, containerID string, tty, stdin bool, cliStream *iocli.CliStream) error {
+	resp, err := c.client.ContainerAttach(ctx, containerID, types.ContainerAttachOptions{
+		Stream: true,
+		Stdin:  stdin,
+		Stdout: true,
+		Stderr: true,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to attach container: %w", err)
+	}
+	log.Printf("Attached container: %q\n", containerID)
+	defer resp.Close()
+
+	var cin io.ReadCloser
+	if stdin {
+		cin = cliStream.InputStream()
+	}
+
+	var cout io.Writer = cliStream.OutputStream()
+	var cerr io.Writer = cliStream.ErrorStream()
+	if tty {
+		cerr = cliStream.OutputStream()
+	}
+
+	go func() {
+		s := ioStreamer{
+			streams:      cliStream,
+			inputStream:  cin,
+			outputStream: cout,
+			errorStream:  cerr,
+			resp:         resp,
+			tty:          tty,
+			stdin:        stdin,
+		}
+
+		if err := s.stream(ctx); err != nil {
+			log.Printf("ioStreamer.stream() failed: %s", err)
+		}
+	}()
+
+	if err := c.client.ContainerStart(ctx, containerID, types.ContainerStartOptions{}); err != nil {
+		return fmt.Errorf("cannot start debugger container: %w", err)
+	}
+
+	if tty && cliStream.OutputStream().IsTerminal() {
+		iocli.StartResizing(ctx, cliStream.OutputStream(), c.client, containerID)
+	}
+
+	statusCh, errCh := c.client.ContainerWait(ctx, containerID, container.WaitConditionNotRunning)
+	select {
+	case err := <-errCh:
+		if err != nil {
+			return fmt.Errorf("waiting debugger container failed: %w", err)
+		}
+	case <-statusCh:
+	}
+
+	return nil
+
+}
+
+type ioStreamer struct {
+	streams *iocli.CliStream
+
+	inputStream  io.ReadCloser
+	outputStream io.Writer
+	errorStream  io.Writer
+
+	resp types.HijackedResponse
+
+	stdin bool
+	tty   bool
+}
+
+func (s *ioStreamer) stream(ctx context.Context) error {
+	if s.tty {
+		s.streams.InputStream().SetRawTerminal()
+		s.streams.OutputStream().SetRawTerminal()
+		defer func() {
+			s.streams.InputStream().RestoreTerminal()
+			s.streams.OutputStream().RestoreTerminal()
+		}()
+	}
+
+	inDone := make(chan error)
+	go func() {
+		if s.stdin {
+			if _, err := io.Copy(s.resp.Conn, s.inputStream); err != nil {
+				log.Printf("Error forwarding stdin: %s", err)
+			}
+		}
+		close(inDone)
+	}()
+
+	outDone := make(chan error)
+	go func() {
+		var err error
+		if s.tty {
+			_, err = io.Copy(s.outputStream, s.resp.Reader)
+		} else {
+			_, err = stdcopy.StdCopy(s.outputStream, s.errorStream, s.resp.Reader)
+		}
+		if err != nil {
+			log.Printf("Error forwarding stdout/stderr: %s", err)
+		}
+		close(outDone)
+	}()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-inDone:
+		<-outDone
+		return nil
+	case <-outDone:
+		return nil
+	}
 }
