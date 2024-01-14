@@ -1,14 +1,21 @@
 {{ if .nonroot }}
-# non-root
+# non-root need to be root to chroot still figuring out how to do this
 su nonroot
-{{ end }}
+{{ else }}
+
+mkdir -p /proc/{{ .PID }}/root/tmp/ 
 
 ln -fs /proc/$$/root/bin/ /proc/{{ .PID }}/root/tmp/.conxec-{{ .ID }}
 
 cat > /tmp/.conxec-entrypoint.sh <<EOF
 #!/bin/sh
-export PATH=$PATH:/tmp/.conxec
-
+export PATH=$PATH:/tmp/.conxec-{{ .ID }}
 chroot /proc/{{ .PID }}/root {{ .CMD }}
 EOF
-exec sh /tmp/.conxec-entrypoint.sh
+
+sh /tmp/.conxec-entrypoint.sh
+
+# cleanup the symlink from the target container
+rm -rf /proc/{{ .PID }}/root/tmp/.conxec-{{ .ID }}
+
+{{ end }}

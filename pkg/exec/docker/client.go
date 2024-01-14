@@ -104,7 +104,6 @@ func (c *DockerClient) CreateContainer(ctx context.Context, targetInspect *exec.
 	if err != nil {
 		return "", fmt.Errorf("failed to create container: %w", err)
 	}
-	fmt.Printf("Created container: %q\n", resp.ID)
 
 	return resp.ID, nil
 }
@@ -119,7 +118,6 @@ func (c *DockerClient) AttachContainer(ctx context.Context, containerID string, 
 	if err != nil {
 		return fmt.Errorf("failed to attach container: %w", err)
 	}
-	log.Printf("Attached container: %q\n", containerID)
 	defer resp.Close()
 
 	var cin io.ReadCloser

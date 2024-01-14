@@ -38,7 +38,7 @@ func ExecCmd() *cobra.Command {
 			if len(args) > 1 {
 				command = args[1:]
 			} else {
-				command = []string{"/bin/sh"}
+				command = []string{"sh"}
 			}
 			log.Printf("target: %s, cmd: %s", target, command)
 			opt := []exec.Option{
@@ -47,6 +47,9 @@ func ExecCmd() *cobra.Command {
 				exec.WithDebuggerImage(dbgImage),
 				exec.WithUser(userGroup),
 				exec.WithName(name),
+				exec.WithRuntime(runtime),
+				exec.WithTty(tty),
+				exec.WithStdin(interactive),
 			}
 			exec, err := exec.New(opt)
 			if err != nil {

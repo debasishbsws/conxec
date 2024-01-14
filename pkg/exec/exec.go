@@ -30,18 +30,18 @@ func New(opt []Option) (*ExecOptions, error) {
 }
 
 type ExecOptions struct {
-	Target      string   // target is the container id or name
-	Command     []string // cmd is the command to execute
-	DbgImg      string   // dbgImg is the debugger image
-	Name        string   // name is the name of the container
-	Runtime     string   // runtime is the docker runtime
-	Schema      string   // schema is the schema of the target
-	UserN       string   // user-name is the user name of the target
-	UserID      string   // user-id is the user id of the target
-	GroupN      string   // group-name is the group name of the target
-	GroupID     string   // group-id is the group id of the target
-	Tty         bool     // tty is the flag to enable tty
-	Interactive bool     // interactive is the flag to enable interactive
+	Target  string   // target is the container id or name
+	Command []string // cmd is the command to execute
+	DbgImg  string   // dbgImg is the debugger image
+	Name    string   // name is the name of the container
+	Runtime string   // runtime is the docker runtime
+	Schema  string   // schema is the schema of the target
+	UserN   string   // user-name is the user name of the target
+	UserID  string   // user-id is the user id of the target
+	GroupN  string   // group-name is the group name of the target
+	GroupID string   // group-id is the group id of the target
+	Tty     bool     // tty is the flag to enable tty
+	Stdin   bool     // interactive is the flag to enable interactive
 
 }
 
@@ -99,6 +99,20 @@ func WithUser(user string) Option {
 		opt.UserID = strings.Split(usergroupInfo[0], ":")[1]
 		opt.GroupN = strings.Split(usergroupInfo[1], ":")[0]
 		opt.GroupID = strings.Split(usergroupInfo[1], ":")[1]
+		return nil
+	}
+}
+
+func WithTty(tty bool) Option {
+	return func(opt *ExecOptions) error {
+		opt.Tty = tty
+		return nil
+	}
+}
+
+func WithStdin(stdin bool) Option {
+	return func(opt *ExecOptions) error {
+		opt.Stdin = stdin
 		return nil
 	}
 }
@@ -195,16 +209,16 @@ func RunDebugger(ctx context.Context, client DebuggerClient, opts *ExecOptions, 
 		// pass do nothing for now, always run as root.
 	}
 	targetPID := 1
-	if !targetContainerInfo.IsPidModeHost {
+	if targetContainerInfo.IsPidModeHost {
 		targetPID = targetContainerInfo.Pid
 	}
 	entrypointStr := generateEntrypoint(debID, targetPID, opts.Command)
-	debugerID, err := client.CreateContainer(ctx, targetContainerInfo, opts.DbgImg, entrypointStr, "root:root", opts.Name, opts.Tty, opts.Interactive)
+	debugerID, err := client.CreateContainer(ctx, targetContainerInfo, opts.DbgImg, entrypointStr, "root:root", opts.Name, opts.Tty, opts.Stdin)
 	if err != nil {
 		return fmt.Errorf("failed to create debugger container: %w", err)
 	}
-	fmt.Println("Debugger container created:", debugerID)
-	client.AttachContainer(ctx, debugerID, opts.Tty, opts.Interactive, cliStream)
+	cliStream.PrintAux("Debugger container created: %v\n>>\n", debugerID)
+	client.AttachContainer(ctx, debugerID, opts.Tty, opts.Stdin, cliStream)
 
 	return nil
 }
