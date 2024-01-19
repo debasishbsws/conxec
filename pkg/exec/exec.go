@@ -185,13 +185,10 @@ func RunDebugger(ctx context.Context, client DebuggerClient, opts *ExecOptions, 
 		return fmt.Errorf("target container: %q is not running", opts.Target)
 	}
 
-	if targetContainerInfo.User != "root" && targetContainerInfo.User != "0" {
-		// TODO: support non-root user
-		/* Look for the user and group in the target container by look at /proc/1/status (somewhere around there)
-		uid, gid, err := getUidGid(target)
-		if not found send error of specifying user and group
-		*/
-		return fmt.Errorf("User of target container: %q is not root user -u to specify user and group", opts.Target)
+	if targetContainerInfo.User != "root" && targetContainerInfo.User != "0" && targetContainerInfo.User == "nonroot" {
+		if opts.UserN == "" {
+			return fmt.Errorf("User of target container: %q is nither root nor nonroot user -u to specify user and group", opts.Target)
+		}
 	}
 
 	cliStream.PrintAux("Pulling debugger image: %q\n", opts.DbgImg)
@@ -212,8 +209,23 @@ func RunDebugger(ctx context.Context, client DebuggerClient, opts *ExecOptions, 
 	if targetContainerInfo.IsPidModeHost {
 		targetPID = targetContainerInfo.Pid
 	}
+	user := "root:root"
+	changeuserScript := ""
+	if targetContainerInfo.User == "nonroot" {
+		user = "nonroot:nonroot"
+	} else if opts.UserN != "" {
+		// rus as root and change the user inside the container by entrypoint
+		changeuserScript = fmt.Sprintf("addgroup -g %s %s \nadduser -D -u %s -G %s %s\n", opts.GroupID, opts.GroupN, opts.UserID, opts.GroupN, opts.UserN)
+	}
 	entrypointStr := generateEntrypoint(debID, targetPID, opts.Command)
-	debugerID, err := client.CreateContainer(ctx, targetContainerInfo, opts.DbgImg, entrypointStr, "root:root", opts.Name, opts.Tty, opts.Stdin)
+
+	// There is a issue can't add user addgroup: number 65532 is not in 0..60000 range; adduser: number 65532 is not in 0..60000 range
+	_ = changeuserScript
+	// if changeuserScript != "" {
+	// 	entrypointStr = changeuserScript + entrypointStr
+	// }
+	// create debugger container
+	debugerID, err := client.CreateContainer(ctx, targetContainerInfo, opts.DbgImg, entrypointStr, user, opts.Name, opts.Tty, opts.Stdin)
 	if err != nil {
 		return fmt.Errorf("failed to create debugger container: %w", err)
 	}

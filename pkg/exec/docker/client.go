@@ -79,7 +79,7 @@ func (c *DockerClient) CreateContainer(ctx context.Context, targetInspect *exec.
 		Image:        image,
 		Entrypoint:   []string{"sh"},
 		Cmd:          []string{"-c", entrypoint},
-		User:         user, //now just use image default user
+		User:         user,
 		Tty:          tty,
 		OpenStdin:    stdin,
 		AttachStdin:  stdin,
