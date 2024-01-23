@@ -1,11 +1,16 @@
 package cmd
 
-import "github.com/spf13/cobra"
+import (
+	"fmt"
 
-func New() *cobra.Command {
+	"github.com/spf13/cobra"
+)
+
+func New(version, commit string) *cobra.Command {
 	rootCmd := &cobra.Command{
-		Use:   "conxec",
-		Short: "conxec is a CLI tool for debuging running container.",
+		Use:     "conxec",
+		Version: fmt.Sprintf("%s (commit: %s)", version, commit),
+		Short:   "conxec is a CLI tool for debuging running container.",
 	}
 
 	rootCmd.AddCommand(ExecCmd())
