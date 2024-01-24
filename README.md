@@ -7,5 +7,11 @@ This tool is a simple solution to this problem. It will run a command in a distr
 This project is heavily inspired by [iximiuz/cdebug](https://github.com/iximiuz/cdebug)
 and it almost did exactly the same thing. But there are some imrovments:
 - In cdebug to work you have to have the target container running as root. In conxec you can run it as a nonroot user which is a very common practice. It will help you to debug your application in a production environment.
-- 
+- It allows you to install and use aditional static applications available on the wolfi. It is very useful if you want to debug your application with some extra tools like `strace` or `tcpdump`.
+- It also allows you to mount a local directory inside the container. It is very useful if you need some local files or apps to debug your application.
+
+## Installation
+go install github.com/debasishbsws/conxec@latest
+
+## Documentation
 
