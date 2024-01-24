@@ -27,6 +27,7 @@ func ExecCmd() *cobra.Command {
 	var runtime string
 	var tty bool
 	var interactive bool
+	var mountDir string
 
 	cmd := &cobra.Command{
 		Use:   "exec [container-id/name] [command]",
@@ -53,6 +54,7 @@ func ExecCmd() *cobra.Command {
 				exec.WithTty(tty),
 				exec.WithStdin(interactive),
 				exec.WithAditionalPackages(aditionalPackages),
+				exec.WithMountDir(mountDir),
 			}
 			exec, err := exec.New(opt)
 			if err != nil {
@@ -74,8 +76,8 @@ func ExecCmd() *cobra.Command {
 	cmd.Flags().StringVar(&runtime, "runtime", "",
 		`Runtime address ("/var/run/docker.sock" | "/run/containerd/containerd.sock" | "https://<kube-api-addr>:8433/...)`,
 	)
-	cmd.Flags().StringSliceP("application", "a", []string{}, "additional application to install in the debugger image")
-
+	cmd.Flags().StringSliceP("application", "a", []string{}, "additional application to install in the debugger image works only with root user")
+	cmd.Flags().StringVarP(&mountDir, "mount", "m", "", "mount directory in the target container can be access by $MNTD")
 	return cmd
 }
 

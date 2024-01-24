@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"path/filepath"
 
 	"github.com/debasishbsws/conxec/pkg/exec"
 	"github.com/debasishbsws/conxec/pkg/iocli"
@@ -61,20 +62,35 @@ func (c *DockerClient) GetContainerInfo(ctx context.Context, container string) (
 }
 
 func (c *DockerClient) PullImage(ctx context.Context, image string, platform string) error {
+	// check if image is already present
+	_, _, err := c.client.ImageInspectWithRaw(ctx, image)
+	if err == nil {
+		log.Println("Debugger image already present")
+		return nil
+	}
 	resp, err := c.client.ImagePull(ctx, image, types.ImagePullOptions{
 		Platform: platform,
 	})
-	defer resp.Close()
 	if err != nil {
 		return fmt.Errorf("failed to pull image: %w", err)
 	}
+	defer resp.Close()
 	return jsonmessage.DisplayJSONMessagesToStream(resp, c.out, nil)
 }
 
 func (c *DockerClient) CreateContainer(ctx context.Context, targetInspect *exec.ContainerInspectInfo,
 	image, entrypoint, user, containerName string,
-	tty, stdin bool,
+	tty, stdin bool, mountDir string,
 ) (string, error) {
+	var bindMount []string
+	if mountDir != "" {
+		absMountDir, err := filepath.Abs(mountDir)
+		if err != nil {
+			return "", fmt.Errorf("failed to convert %s to absolute path: %w", mountDir, err)
+		}
+		bindMount = []string{absMountDir + ":/work"}
+	}
+
 	resp, err := c.client.ContainerCreate(ctx, &container.Config{
 		Image:        image,
 		Entrypoint:   []string{"sh"},
@@ -94,6 +110,7 @@ func (c *DockerClient) CreateContainer(ctx context.Context, targetInspect *exec.
 			AutoRemove:  true, // remove the container when it exits TODO: make it configurable '--rm' flag
 			PidMode:     container.PidMode("container:" + targetInspect.ID),
 			NetworkMode: container.NetworkMode("container:" + targetInspect.ID),
+			Binds:       bindMount,
 		},
 		&network.NetworkingConfig{
 			EndpointsConfig: c.targetInspect.NetworkSettings.Networks,

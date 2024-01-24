@@ -4,7 +4,6 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"log"
 	"regexp"
 	"strconv"
 	"strings"
@@ -42,7 +41,8 @@ type ExecOptions struct {
 	GroupID           string   // group-id is the group id of the target
 	Tty               bool     // tty is the flag to enable tty
 	Stdin             bool     // interactive is the flag to enable interactive
-	AditionalPackages []string
+	AditionalPackages []string // aditionalPackages is the list of packages to install
+	mountDir          string   // mountDir is the directory to mount in the target container
 }
 
 type Option func(*ExecOptions) error
@@ -124,6 +124,13 @@ func WithAditionalPackages(packages []string) Option {
 	}
 }
 
+func WithMountDir(dir string) Option {
+	return func(opt *ExecOptions) error {
+		opt.mountDir = dir
+		return nil
+	}
+}
+
 type DebuggerClient interface {
 	// GetContainerInfo returns the container info
 	GetContainerInfo(ctx context.Context, containerName string) (*ContainerInspectInfo, error)
@@ -132,7 +139,7 @@ type DebuggerClient interface {
 	// Create a Container and return the container id
 	CreateContainer(ctx context.Context, targetInspect *ContainerInspectInfo,
 		image, entrypoint, user, containerName string,
-		tty, stdin bool) (containerID string, err error)
+		tty, stdin bool, mountDir string) (containerID string, err error)
 	AttachContainer(ctx context.Context, containerID string, tty, stdin bool, cliStream *iocli.CliStream) error
 }
 
@@ -160,7 +167,6 @@ func generateEntrypoint(runID string, targetPID int, cmd []string, isRoot bool, 
 	} else {
 		command = "sh -c '" + strings.Join(shellescape(cmd), " ") + "'"
 	}
-	log.Printf("cmd: %s\n", cmd)
 	data := map[string]interface{}{
 		"ISROOT": isRoot,
 		"APPS":   apps,
@@ -194,7 +200,7 @@ func RunDebugger(ctx context.Context, client DebuggerClient, opts *ExecOptions, 
 		return fmt.Errorf("target container: %q is not running", opts.Target)
 	}
 
-	// TODO: refactor this
+	// TODO: refactor this-----------------
 	if targetContainerInfo.User != "root" && targetContainerInfo.User != "0" && targetContainerInfo.User == "nonroot" {
 		if opts.UserN == "" {
 			return fmt.Errorf("User of target container: %q is nither root nor nonroot user -u to specify user and group", opts.Target)
@@ -213,6 +219,7 @@ func RunDebugger(ctx context.Context, client DebuggerClient, opts *ExecOptions, 
 		// rus as root and change the user inside the container by entrypoint
 		changeuserScript = fmt.Sprintf("addgroup -g %s %s \nadduser -D -u %s -G %s %s\n", opts.GroupID, opts.GroupN, opts.UserID, opts.GroupN, opts.UserN)
 	}
+	//-----------------
 
 	cliStream.PrintAux("Pulling debugger image: %q\n", opts.DbgImg)
 
@@ -242,7 +249,7 @@ func RunDebugger(ctx context.Context, client DebuggerClient, opts *ExecOptions, 
 	// }
 
 	// create debugger container
-	debugerID, err := client.CreateContainer(ctx, targetContainerInfo, opts.DbgImg, entrypointStr, user, opts.Name, opts.Tty, opts.Stdin)
+	debugerID, err := client.CreateContainer(ctx, targetContainerInfo, opts.DbgImg, entrypointStr, user, opts.Name, opts.Tty, opts.Stdin, opts.mountDir)
 	if err != nil {
 		return fmt.Errorf("failed to create debugger container: %w", err)
 	}
