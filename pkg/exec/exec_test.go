@@ -44,7 +44,7 @@ func TestGenerateEntrypoint(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Call function
-			got := generateEntrypoint(tt.runID, tt.targetPID, tt.cmd)
+			got := generateEntrypoint(tt.runID, tt.targetPID, tt.cmd, true, []string{})
 			fmt.Printf("got: %s\n", got)
 
 			// Check for panic

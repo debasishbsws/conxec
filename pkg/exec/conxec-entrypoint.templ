@@ -1,10 +1,17 @@
+{{if .ISROOT }}
+{{range .APPS }}
+apk add --no-cache {{ . }}
+{{ end }}
+{{ end }}
+
 mkdir -p /proc/{{ .PID }}/root/tmp/ 
 
-ln -fs /proc/$$/root/bin/ /proc/{{ .PID }}/root/tmp/.conxec-{{ .ID }}
+ln -fs /proc/$$/root/bin/ /proc/{{ .PID }}/root/tmp/.conxec-bin-{{ .ID }}
+ln -fs /proc/$$/root/usr/bin/ /proc/{{ .PID }}/root/tmp/.conxec-usrbin-{{ .ID }}
 
 cat > /tmp/.conxec-entrypoint.sh <<EOF
 #!/bin/sh
-export PATH=$PATH:/tmp/.conxec-{{ .ID }}
+export PATH=$PATH:/tmp/.conxec-bin-{{ .ID }}:/tmp/.conxec-usrbin-{{ .ID }}
 chroot /proc/{{ .PID }}/root {{ .CMD }}
 EOF
 

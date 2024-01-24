@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"strings"
 
@@ -40,7 +39,10 @@ func ExecCmd() *cobra.Command {
 			} else {
 				command = []string{"sh"}
 			}
-			log.Printf("target: %s, cmd: %s", target, command)
+			aditionalPackages, err := cmd.Flags().GetStringSlice("application")
+			if err != nil {
+				return err
+			}
 			opt := []exec.Option{
 				exec.WithTarget(target),
 				exec.WithCommand(command),
@@ -50,6 +52,7 @@ func ExecCmd() *cobra.Command {
 				exec.WithRuntime(runtime),
 				exec.WithTty(tty),
 				exec.WithStdin(interactive),
+				exec.WithAditionalPackages(aditionalPackages),
 			}
 			exec, err := exec.New(opt)
 			if err != nil {
@@ -71,6 +74,7 @@ func ExecCmd() *cobra.Command {
 	cmd.Flags().StringVar(&runtime, "runtime", "",
 		`Runtime address ("/var/run/docker.sock" | "/run/containerd/containerd.sock" | "https://<kube-api-addr>:8433/...)`,
 	)
+	cmd.Flags().StringSliceP("application", "a", []string{}, "additional application to install in the debugger image")
 
 	return cmd
 }

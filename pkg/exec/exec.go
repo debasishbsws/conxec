@@ -30,19 +30,19 @@ func New(opt []Option) (*ExecOptions, error) {
 }
 
 type ExecOptions struct {
-	Target  string   // target is the container id or name
-	Command []string // cmd is the command to execute
-	DbgImg  string   // dbgImg is the debugger image
-	Name    string   // name is the name of the container
-	Runtime string   // runtime is the docker runtime
-	Schema  string   // schema is the schema of the target
-	UserN   string   // user-name is the user name of the target
-	UserID  string   // user-id is the user id of the target
-	GroupN  string   // group-name is the group name of the target
-	GroupID string   // group-id is the group id of the target
-	Tty     bool     // tty is the flag to enable tty
-	Stdin   bool     // interactive is the flag to enable interactive
-
+	Target            string   // target is the container id or name
+	Command           []string // cmd is the command to execute
+	DbgImg            string   // dbgImg is the debugger image
+	Name              string   // name is the name of the container
+	Runtime           string   // runtime is the docker runtime
+	Schema            string   // schema is the schema of the target
+	UserN             string   // user-name is the user name of the target
+	UserID            string   // user-id is the user id of the target
+	GroupN            string   // group-name is the group name of the target
+	GroupID           string   // group-id is the group id of the target
+	Tty               bool     // tty is the flag to enable tty
+	Stdin             bool     // interactive is the flag to enable interactive
+	AditionalPackages []string
 }
 
 type Option func(*ExecOptions) error
@@ -117,6 +117,13 @@ func WithStdin(stdin bool) Option {
 	}
 }
 
+func WithAditionalPackages(packages []string) Option {
+	return func(opt *ExecOptions) error {
+		opt.AditionalPackages = packages
+		return nil
+	}
+}
+
 type DebuggerClient interface {
 	// GetContainerInfo returns the container info
 	GetContainerInfo(ctx context.Context, containerName string) (*ContainerInspectInfo, error)
@@ -145,7 +152,7 @@ func shellescape(args []string) []string {
 //go:embed conxec-entrypoint.templ
 var entrypointTemplate string
 
-func generateEntrypoint(runID string, targetPID int, cmd []string) string {
+func generateEntrypoint(runID string, targetPID int, cmd []string, isRoot bool, apps []string) string {
 	entrypointTemplae := template.Must(template.New("entrypoint").Parse(entrypointTemplate))
 	var command string
 	if len(cmd) == 0 {
@@ -154,10 +161,12 @@ func generateEntrypoint(runID string, targetPID int, cmd []string) string {
 		command = "sh -c '" + strings.Join(shellescape(cmd), " ") + "'"
 	}
 	log.Printf("cmd: %s\n", cmd)
-	data := map[string]string{
-		"ID":  runID,
-		"PID": fmt.Sprintf("%d", targetPID),
-		"CMD": command,
+	data := map[string]interface{}{
+		"ISROOT": isRoot,
+		"APPS":   apps,
+		"ID":     runID,
+		"PID":    fmt.Sprintf("%d", targetPID),
+		"CMD":    command,
 	}
 	var entrypoint strings.Builder
 	if err := entrypointTemplae.Execute(&entrypoint, data); err != nil {
@@ -185,10 +194,24 @@ func RunDebugger(ctx context.Context, client DebuggerClient, opts *ExecOptions, 
 		return fmt.Errorf("target container: %q is not running", opts.Target)
 	}
 
+	// TODO: refactor this
 	if targetContainerInfo.User != "root" && targetContainerInfo.User != "0" && targetContainerInfo.User == "nonroot" {
 		if opts.UserN == "" {
 			return fmt.Errorf("User of target container: %q is nither root nor nonroot user -u to specify user and group", opts.Target)
 		}
+	}
+	user := "root:root"
+	isRoot := true
+	changeuserScript := ""
+	if targetContainerInfo.User == "nonroot" {
+		user = "nonroot:nonroot"
+		isRoot = false
+		if len(opts.AditionalPackages) != 0 {
+			return fmt.Errorf("Aditional packages can't be installed when the target container is in nonroot user")
+		}
+	} else if opts.UserN != "" {
+		// rus as root and change the user inside the container by entrypoint
+		changeuserScript = fmt.Sprintf("addgroup -g %s %s \nadduser -D -u %s -G %s %s\n", opts.GroupID, opts.GroupN, opts.UserID, opts.GroupN, opts.UserN)
 	}
 
 	cliStream.PrintAux("Pulling debugger image: %q\n", opts.DbgImg)
@@ -209,21 +232,15 @@ func RunDebugger(ctx context.Context, client DebuggerClient, opts *ExecOptions, 
 	if targetContainerInfo.IsPidModeHost {
 		targetPID = targetContainerInfo.Pid
 	}
-	user := "root:root"
-	changeuserScript := ""
-	if targetContainerInfo.User == "nonroot" {
-		user = "nonroot:nonroot"
-	} else if opts.UserN != "" {
-		// rus as root and change the user inside the container by entrypoint
-		changeuserScript = fmt.Sprintf("addgroup -g %s %s \nadduser -D -u %s -G %s %s\n", opts.GroupID, opts.GroupN, opts.UserID, opts.GroupN, opts.UserN)
-	}
-	entrypointStr := generateEntrypoint(debID, targetPID, opts.Command)
 
-	// There is a issue can't add user addgroup: number 65532 is not in 0..60000 range; adduser: number 65532 is not in 0..60000 range
+	entrypointStr := generateEntrypoint(debID, targetPID, opts.Command, isRoot, opts.AditionalPackages)
+
+	// TODO: There is a issue can't add user addgroup: number 65532 is not in 0..60000 range; adduser: number 65532 is not in 0..60000 range
 	_ = changeuserScript
 	// if changeuserScript != "" {
 	// 	entrypointStr = changeuserScript + entrypointStr
 	// }
+
 	// create debugger container
 	debugerID, err := client.CreateContainer(ctx, targetContainerInfo, opts.DbgImg, entrypointStr, user, opts.Name, opts.Tty, opts.Stdin)
 	if err != nil {
